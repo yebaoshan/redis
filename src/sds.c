@@ -855,6 +855,7 @@ sds *sdssplitlen(const char *s, ssize_t len, const char *sep, int seplen, int *c
         }
         /* search the separator */
         if ((seplen == 1 && *(s+j) == sep[0]) || (memcmp(s+j,sep,seplen) == 0)) {
+            if (j == start) continue;
             tokens[elements] = sdsnewlen(s+start,j-start);
             if (tokens[elements] == NULL) goto cleanup;
             elements++;
@@ -863,9 +864,11 @@ sds *sdssplitlen(const char *s, ssize_t len, const char *sep, int seplen, int *c
         }
     }
     /* Add the final element. We are sure there is room in the tokens array. */
-    tokens[elements] = sdsnewlen(s+start,len-start);
-    if (tokens[elements] == NULL) goto cleanup;
-    elements++;
+    if (len != start) {
+        tokens[elements] = sdsnewlen(s+start,len-start);
+        if (tokens[elements] == NULL) goto cleanup;
+        elements++;
+    }
     *count = elements;
     return tokens;
 
@@ -974,9 +977,9 @@ sds *sdssplitargs(const char *line, int *argc) {
     char **vector = NULL;
 
     *argc = 0;
-    while(1) {
+    while (1) {
         /* skip blanks */
-        while(*p && isspace(*p)) p++;
+        while (*p && isspace(*p)) p++;
         if (*p) {
             /* get a token */
             int inq=0;  /* set to 1 if we are in "quotes" */
@@ -984,7 +987,7 @@ sds *sdssplitargs(const char *line, int *argc) {
             int done=0;
 
             if (current == NULL) current = sdsempty();
-            while(!done) {
+            while (!done) {
                 if (inq) {
                     if (*p == '\\' && *(p+1) == 'x' &&
                                              is_hex_digit(*(p+2)) &&
@@ -1089,6 +1092,11 @@ err:
  * as the input pointer since no resize is needed. */
 sds sdsmapchars(sds s, const char *from, const char *to, size_t setlen) {
     size_t j, i, l = sdslen(s);
+    size_t fl = strlen(from);
+    size_t tl = strlen(to);
+    size_t min = fl > tl ? tl : fl;
+    if (min < setlen)
+        setlen = min;
 
     for (j = 0; j < l; j++) {
         for (i = 0; i < setlen; i++) {
