@@ -158,6 +158,7 @@ static intset *intsetUpgradeAndAdd(intset *is, int64_t value) {
     uint8_t curenc = intrev32ifbe(is->encoding);
     uint8_t newenc = _intsetValueEncoding(value);
     int length = intrev32ifbe(is->length);
+    // 需要扩展，那value就超过了当前编码所能表示的范围，所以<0为最下，>0为最大
     int prepend = value < 0 ? 1 : 0;
 
     /* First set new encoding and resize */

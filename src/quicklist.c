@@ -843,6 +843,8 @@ REDIS_STATIC void _quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
         new_node->zl = ziplistPush(ziplistNew(), value, sz, ZIPLIST_HEAD);
         __quicklistInsertNode(quicklist, NULL, new_node, after);
         new_node->count++;
+        // ??? new_node->sz ???
+        // quicklistNodeUpdateSz(new_node);
         quicklist->count++;
         return;
     }
@@ -854,6 +856,7 @@ REDIS_STATIC void _quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
         full = 1;
     }
 
+    // ??? offset 和count的比较 offset应该是从0开始的，node->count从1开始的
     if (after && (entry->offset == node->count)) {
         D("At Tail of current ziplist");
         at_tail = 1;
@@ -861,6 +864,7 @@ REDIS_STATIC void _quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
             D("Next node is full too.");
             full_next = 1;
         }
+        // entry是当前node中ziplist的最后一个值，所以可能需要将值插入下一个node
     }
 
     if (!after && (entry->offset == 0)) {
@@ -870,6 +874,7 @@ REDIS_STATIC void _quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
             D("Prev node is full too.");
             full_prev = 1;
         }
+        // entry是当前node中ziplist的第一个值，所以可能需要将值插入上一个node
     }
 
     /* Now determine where and how to insert the new element */

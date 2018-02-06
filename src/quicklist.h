@@ -94,7 +94,7 @@ typedef struct quicklistEntry {
     unsigned char *value;
     long long longval;
     unsigned int sz;
-    int offset;
+    int offset;                    // 表示指向ziplist中的第几个值
 } quicklistEntry;
 
 #define QUICKLIST_HEAD 0

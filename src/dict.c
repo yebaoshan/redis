@@ -249,6 +249,7 @@ int dictRehashMilliseconds(dict *d, int ms) {
     return rehashes;
 }
 
+// ??? 作用 ???
 /* This function performs just a step of rehashing, and only if there are
  * no safe iterators bound to our hash table. When we have iterators in the
  * middle of a rehashing we can't mess with the two hash tables otherwise
@@ -737,6 +738,7 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
     return stored;
 }
 
+// ??? 算法含义 ???
 /* Function to reverse bits. Algorithm from:
  * http://graphics.stanford.edu/~seander/bithacks.html#ReverseParallel */
 static unsigned long rev(unsigned long v) {
@@ -892,6 +894,7 @@ unsigned long dictScan(dict *d,
                 de = next;
             }
 
+            // ??? 作用意义 ???
             /* Increment bits not covered by the smaller mask */
             v = (((v | m0) + 1) & ~m0) | (v & m0);
 
