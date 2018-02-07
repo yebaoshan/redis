@@ -325,6 +325,7 @@ REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
 
     if (depth > 2) {
         /* At this point, forward and reverse are one node beyond depth */
+        // ??? 为什么要再压缩这两个节点
         quicklistCompressNode(forward);
         quicklistCompressNode(reverse);
     }
@@ -378,6 +379,7 @@ REDIS_STATIC void __quicklistInsertNode(quicklist *quicklist,
         quicklist->head = quicklist->tail = new_node;
     }
 
+    // ??? 为什么不是new_node: 注意函数注释Note.if 实际使用情况有出入
     if (old_node)
         quicklistCompress(quicklist, old_node);
 
@@ -430,18 +432,18 @@ REDIS_STATIC int _quicklistNodeAllowInsert(const quicklistNode *node,
         ziplist_overhead = 5;
 
     /* size of forward offset */
-    if (sz < 64)
+    if (sz < 64)                // 长度小于2^6 用1个字节编码
         ziplist_overhead += 1;
-    else if (likely(sz < 16384))
+    else if (likely(sz < 16384)) // 长度小于2^14 用2个字节编码
         ziplist_overhead += 2;
     else
-        ziplist_overhead += 5;
+        ziplist_overhead += 5;  // 长度小于2^32 用5个字节编码
 
     /* new_sz overestimates if 'sz' encodes to an integer type */
     unsigned int new_sz = node->sz + sz + ziplist_overhead;
     if (likely(_quicklistNodeSizeMeetsOptimizationRequirement(new_sz, fill)))
         return 1;
-    else if (!sizeMeetsSafetyLimit(new_sz))
+    else if (!sizeMeetsSafetyLimit(new_sz)) //  校验单个节点是否超过8kb，防止fill为正数时单个节点内存过大
         return 0;
     else if ((int)node->count < fill)
         return 1;
@@ -857,7 +859,7 @@ REDIS_STATIC void _quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
     }
 
     // ??? offset 和count的比较 offset应该是从0开始的，node->count从1开始的
-    if (after && (entry->offset == node->count)) {
+    if (full && after && (entry->offset == node->count)) {
         D("At Tail of current ziplist");
         at_tail = 1;
         if (!_quicklistNodeAllowInsert(node->next, fill, sz)) {
@@ -867,7 +869,7 @@ REDIS_STATIC void _quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
         // entry是当前node中ziplist的最后一个值，所以可能需要将值插入下一个node
     }
 
-    if (!after && (entry->offset == 0)) {
+    if (full && !after && (entry->offset == 0)) {
         D("At Head");
         at_head = 1;
         if (!_quicklistNodeAllowInsert(node->prev, fill, sz)) {
@@ -1449,7 +1451,7 @@ void quicklistPush(quicklist *quicklist, void *value, const size_t sz,
 #define TEST(name) printf("test — %s\n", name);
 #define TEST_DESC(name, ...) printf("test — " name "\n", __VA_ARGS__);
 
-#define QL_TEST_VERBOSE 0
+#define QL_TEST_VERBOSE 1
 
 #define UNUSED(x) (void)(x)
 static void ql_info(quicklist *ql) {
@@ -1578,6 +1580,8 @@ static int _ql_verify(quicklist *ql, uint32_t len, uint32_t count,
         unsigned int high_raw = ql->len - ql->compress;
 
         for (unsigned int at = 0; at < ql->len; at++, node = node->next) {
+            printf("node:%d, sz(%d), count(%d), encoding(%d), attempted_compress(%d)",
+                   node->sz, node->count, node->encoding, node->attempted_compress);
             if (node && (at < low_raw || at >= high_raw)) {
                 if (node->encoding != QUICKLIST_NODE_ENCODING_RAW) {
                     yell("Incorrect compression: node %d is "
@@ -1613,11 +1617,33 @@ static char *genstr(char *prefix, int i) {
     return result;
 }
 
+static void insertTest()
+{
+    unsigned int err = 0;
+
+    printf("insert [after] fill 5 at compress 1");
+    quicklist *ql = quicklistNew(4, 1);
+    for (int i = 0; i < 10; i++)
+        quicklistPushHead(ql, genstr("hello", i), 32);
+    for (int i = 0; i < 1; i++) {
+        quicklistEntry entry;
+        quicklistIndex(ql, 5, &entry);
+        quicklistInsertAfter(ql, &entry, genstr("abc", i), 32);
+    }
+
+    ql_info(ql);
+    ql_verify(ql, 0, 0, 0, 0);
+    quicklistRelease(ql);
+
+}
+
 /* main test, but callable from other files */
 int quicklistTest(int argc, char *argv[]) {
     UNUSED(argc);
     UNUSED(argv);
 
+    insertTest();
+#if 0
     unsigned int err = 0;
     int optimize_start =
         -(int)(sizeof(optimization_level) / sizeof(*optimization_level));
@@ -2652,5 +2678,6 @@ int quicklistTest(int argc, char *argv[]) {
         ERR("Sorry, not all tests passed!  In fact, %d tests failed.", err);
 
     return err;
+#endif
 }
 #endif

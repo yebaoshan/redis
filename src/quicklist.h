@@ -49,7 +49,7 @@ typedef struct quicklistNode {
     unsigned int count : 16;     /* count of items in ziplist */
     unsigned int encoding : 2;   /* RAW==1 or LZF==2 */
     unsigned int container : 2;  /* NONE==1 or ZIPLIST==2 */
-    unsigned int recompress : 1; /* was this node previous compressed? */
+    unsigned int recompress : 1; /* was this node previous compressed? */ // 为1则压缩时，直接压缩，不需判断
     unsigned int attempted_compress : 1; /* node can't compress; too small */
     unsigned int extra : 10; /* more bits to steal for future usage */
 } quicklistNode;
@@ -83,18 +83,18 @@ typedef struct quicklistIter {
     const quicklist *quicklist;
     quicklistNode *current;
     unsigned char *zi;
-    long offset; /* offset in current ziplist */
+    long offset; /* offset in current ziplist */ // 表示指向ziplist中的第几个值,可能为负数
     int direction;
 } quicklistIter;
 
 typedef struct quicklistEntry {
     const quicklist *quicklist;
     quicklistNode *node;
-    unsigned char *zi;
-    unsigned char *value;
-    long long longval;
-    unsigned int sz;
-    int offset;                    // 表示指向ziplist中的第几个值
+    unsigned char *zi;             // 表示指向ziplist中当前entry的位置
+    unsigned char *value;          // 如是字符串，则其内容
+    long long longval;             // 如是整数，则其值
+    unsigned int sz;               // 当前entry的内容payload在ziplist中的字节大小,主要是针对字符串
+    int offset;                    // 表示指向ziplist中的第几个值,可能为负数
 } quicklistEntry;
 
 #define QUICKLIST_HEAD 0

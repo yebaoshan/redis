@@ -266,6 +266,7 @@ unsigned char *zipmapSet(unsigned char *zm, unsigned char *key, unsigned int kle
 
     /* Just write the key + value and we are done. */
     /* Key: */
+    // zipmapEncodeLength 中写入了klen值
     p += zipmapEncodeLength(p,klen);
     memcpy(p,key,klen);
     p += klen;
@@ -298,6 +299,7 @@ unsigned char *zipmapDel(unsigned char *zm, unsigned char *key, unsigned int kle
 
 /* Call before iterating through elements via zipmapNext() */
 unsigned char *zipmapRewind(unsigned char *zm) {
+    // +1 跳过zmlen占用的1字节
     return zm+1;
 }
 
@@ -321,6 +323,7 @@ unsigned char *zipmapNext(unsigned char *zm, unsigned char **key, unsigned int *
     }
     zm += zipmapRawKeyLength(zm);
     if (value) {
+        // +1 跳过free占用的1字节
         *value = zm+1;
         *vlen = zipmapDecodeLength(zm);
         *value += ZIPMAP_LEN_BYTES(*vlen);

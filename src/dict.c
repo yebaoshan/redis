@@ -1033,6 +1033,7 @@ dictEntry **dictFindEntryRefByPtrAndHash(dict *d, const void *oldptr, uint64_t h
 size_t _dictGetStatsHt(char *buf, size_t bufsize, dictht *ht, int tableid) {
     unsigned long i, slots = 0, chainlen, maxchainlen = 0;
     unsigned long totchainlen = 0;
+    // 下标对应链表中多少个元素; clvector[1]为只有1个元素的entry长度
     unsigned long clvector[DICT_STATS_VECTLEN];
     size_t l = 0;
 
