@@ -158,7 +158,7 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
         for (i = zsl->level; i < level; i++) {
             rank[i] = 0;
             update[i] = zsl->header;
-            // ??? span = zsh->length why ??? should 0 指向NULL的长度
+            // 最后还有一层NULL, header指向NULL的span为length
             update[i]->level[i].span = zsl->length;
         }
         zsl->level = level;
@@ -348,7 +348,7 @@ unsigned long zslDeleteRangeByScore(zskiplist *zsl, zrangespec *range, dict *dic
     {
         zskiplistNode *next = x->level[0].forward;
         zslDeleteNode(zsl,x,update);
-        // ??? dict 作用
+        // dict 作用: szet中包含一个dict和zskiplist
         dictDelete(dict,x->ele);
         zslFreeNode(x); /* Here is where x->ele is actually released. */
         removed++;
