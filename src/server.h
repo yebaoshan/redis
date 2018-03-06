@@ -222,21 +222,21 @@ typedef long long mstime_t; /* millisecond time type. */
 #define CLIENT_SLAVE (1<<0)   /* This client is a slave server */
 #define CLIENT_MASTER (1<<1)  /* This client is a master server */
 #define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
-#define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context */
-#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation */
-#define CLIENT_DIRTY_CAS (1<<5) /* Watched keys modified. EXEC will fail. */
+#define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context */ // 正在执行事务
+#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation */ // 客户端正在被BRPOP、BLPOP等命令阻塞
+#define CLIENT_DIRTY_CAS (1<<5) /* Watched keys modified. EXEC will fail. */ // 事务使用watch命令监视的数据库键已经被修改
 #define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* Close after writing entire reply. */
 #define CLIENT_UNBLOCKED (1<<7) /* This client was unblocked and is stored in
                                   server.unblocked_clients */
-#define CLIENT_LUA (1<<8) /* This is a non connected client used by Lua */
-#define CLIENT_ASKING (1<<9)     /* Client issued the ASKING command */
-#define CLIENT_CLOSE_ASAP (1<<10)/* Close this client ASAP */
+#define CLIENT_LUA (1<<8) /* This is a non connected client used by Lua */ // 处理Lua脚本里包含redis命令的伪客户端
+#define CLIENT_ASKING (1<<9)     /* Client issued the ASKING command */ // 客户端向集群节点发送啦ASKING命令
+#define CLIENT_CLOSE_ASAP (1<<10)/* Close this client ASAP */ // 客户端的输出缓冲区大小超出服务器允许范围，下一次执行serverCron将关闭此客户端，直接释放积在输出缓冲区中的内容
 #define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
-#define CLIENT_DIRTY_EXEC (1<<12)  /* EXEC will fail for errors while queueing */
+#define CLIENT_DIRTY_EXEC (1<<12)  /* EXEC will fail for errors while queueing */ // 事务在命令入队时出现错误
 #define CLIENT_MASTER_FORCE_REPLY (1<<13)  /* Queue replies even if is master */
-#define CLIENT_FORCE_AOF (1<<14)   /* Force AOF propagation of current cmd. */
-#define CLIENT_FORCE_REPL (1<<15)  /* Force replication of current cmd. */
-#define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */
+#define CLIENT_FORCE_AOF (1<<14)   /* Force AOF propagation of current cmd. */ // 强制服务器将当前执行的命令写入到AOF文件里面
+#define CLIENT_FORCE_REPL (1<<15)  /* Force replication of current cmd. */ // 强制服务器将当前执行命令复制给所有从服务器
+#define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */ // 客户端是版本低于2.8的从服务器
 #define CLIENT_READONLY (1<<17)    /* Cluster client is in read-only state. */
 #define CLIENT_PUBSUB (1<<18)      /* Client is in Pub/Sub mode. */
 #define CLIENT_PREVENT_AOF_PROP (1<<19)  /* Don't propagate to AOF. */
@@ -686,39 +686,56 @@ typedef struct readyList {
  * Clients are taken in a linked list. */
 typedef struct client {
     uint64_t id;            /* Client incremental unique ID. */
+    // -1伪客户端，>-1为普通客户端描述符
     int fd;                 /* Client socket. */
     redisDb *db;            /* Pointer to currently SELECTed DB. */
     robj *name;             /* As set by CLIENT SETNAME. */
+    // 输入缓存区
     sds querybuf;           /* Buffer we use to accumulate client queries. */
     sds pending_querybuf;   /* If this is a master, this buffer represents the
                                yet not applied replication stream that we
                                are receiving from the master. */
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
+    // 命令与命令参数
     int argc;               /* Num of arguments of current command. */
     robj **argv;            /* Arguments of current command. */
+    // 命令列表中找到对应命令后,会将cmd指向命令表中对应的redisCommand结构
     struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
+    // 参数列表中未读取命令参数的数量，读取一个，该值减1
     int multibulklen;       /* Number of multi bulk arguments left to read. */
+    // 命令内容的长度
     long bulklen;           /* Length of bulk argument in multi bulk request. */
+    // 可变回复缓存列表，用于发送大于固定回复缓冲区的回复
     list *reply;            /* List of reply objects to send to the client. */
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
     time_t ctime;           /* Client creation time. */
+    // 最后一次和服务器交互的时间
     time_t lastinteraction; /* Time of the last interaction, used for timeout */
+    // 客户端的输出缓冲区超过软性限制的时间，记录输出缓冲区第一次到达软性限制的时间
     time_t obuf_soft_limit_reached_time;
     int flags;              /* Client flags: CLIENT_* macros. */
+    // 客户端是否通过了身份验证
     int authenticated;      /* When requirepass is non-NULL. */
     int replstate;          /* Replication state if this is a slave. */
+    // 在ack上设置从节点的写处理器，是否在slave向master发送ack
     int repl_put_online_on_ack; /* Install slave write handler on ACK. */
+    // RDB文件的文件描述符
     int repldbfd;           /* Replication DB file descriptor. */
     off_t repldboff;        /* Replication DB file offset. */
     off_t repldbsize;       /* Replication DB file size. */
+    // 主服务器传来的RDB文件的大小，符合协议的字符串形式
     sds replpreamble;       /* Replication DB preamble. */
+    // replication复制的偏移量
     long long read_reploff; /* Read replication offset if this is a master. */
     long long reploff;      /* Applied replication offset if this is a master. */
+    // 通过ack命令接收到的偏移量
     long long repl_ack_off; /* Replication ack offset, if this is a slave. */
+    // 通过ack命令接收到的偏移量所用的时间
     long long repl_ack_time;/* Replication ack time, if this is a slave. */
+    // FULLRESYNC回复给从节点的offset
     long long psync_initial_offset; /* FULLRESYNC reply offset other slaves
                                        copying this slave output buffer
                                        should use. */
@@ -729,15 +746,18 @@ typedef struct client {
     multiState mstate;      /* MULTI/EXEC state */
     int btype;              /* Type of blocking op if CLIENT_BLOCKED. */
     blockingState bpop;     /* blocking state */
+    // 最近一个写全局的复制偏移量
     long long woff;         /* Last write global replication offset. */
     list *watched_keys;     /* Keys WATCHED for MULTI/EXEC CAS */
     dict *pubsub_channels;  /* channels a client is interested in (SUBSCRIBE) */
     list *pubsub_patterns;  /* patterns a client is interested in (SUBSCRIBE) */
+    // 被缓存的ID
     sds peerid;             /* Cached peer ID. */
     listNode *client_list_node; /* list node in client list */
 
     /* Response buffer */
-    int bufpos;
+    // 回复固定缓冲区
+    int bufpos; // 固定缓冲区已使用字节数
     char buf[PROTO_REPLY_CHUNK_BYTES];
 } client;
 
@@ -1227,9 +1247,13 @@ typedef void redisCommandProc(client *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
 struct redisCommand {
     char *name;
+    // 函数指针，指向命令的实现函数
     redisCommandProc *proc;
+    // 命令参数个数,负数表示参数数量大于等于
     int arity;
+    // 字符串形式的标识值，这个值记录了命令的属性，如写命令还是读命令等
     char *sflags; /* Flags as string representation, one char per flag. */
+    // 对sfalgs标识进行分析得出的二进制标识，由程序自动生成
     int flags;    /* The actual flags, obtained from the 'sflags' field. */
     /* Use a function to determine keys arguments in a command line.
      * Used for Redis Cluster redirect. */
@@ -1238,6 +1262,7 @@ struct redisCommand {
     int firstkey; /* The first argument that's a key (0 = no keys) */
     int lastkey;  /* The last argument that's a key */
     int keystep;  /* The step between first and last key */
+    // 执行命令所耗费的总时长; 总共执行了多少次这个命令
     long long microseconds, calls;
 };
 
