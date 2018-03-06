@@ -1926,6 +1926,7 @@ void backgroundSaveDoneHandler(int exitcode, int bysignal) {
 
 /* Spawn an RDB child that writes the RDB to the sockets of the slaves
  * that are currently in SLAVE_STATE_WAIT_BGSAVE_START state. */
+// 无盘sock 写rdb到从节点
 int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
     int *fds;
     uint64_t *clientids;
@@ -1942,6 +1943,7 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
      * send back to the parent the IDs of the slaves that successfully
      * received all the writes. */
     if (pipe(pipefds) == -1) return C_ERR;
+    // 用于成功写完后，子进程向父进程发送从节点ID
     server.rdb_pipe_read_result_from_child = pipefds[0];
     server.rdb_pipe_write_result_to_parent = pipefds[1];
 
@@ -1961,6 +1963,7 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
         if (slave->replstate == SLAVE_STATE_WAIT_BGSAVE_START) {
             clientids[numfds] = slave->id;
             fds[numfds++] = slave->fd;
+            // 发送完整同步操作信令
             replicationSetupSlaveForFullResync(slave,getPsyncInitialOffset());
             /* Put the socket in blocking mode to simplify RDB transfer.
              * We'll restore it when the children returns (since duped socket
@@ -1984,6 +1987,7 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
         closeListeningSockets(0);
         redisSetProcTitle("redis-rdb-to-slaves");
 
+        // 发送rdb内容
         retval = rdbSaveRioWithEOFMark(&slave_sockets,NULL,rsi);
         if (retval == C_OK && rioFlush(&slave_sockets) == 0)
             retval = C_ERR;
@@ -2045,6 +2049,7 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
     } else {
         /* Parent */
         if (childpid == -1) {
+            // 子进程创建失败
             serverLog(LL_WARNING,"Can't save in background: fork: %s",
                 strerror(errno));
 
@@ -2145,6 +2150,7 @@ void bgsaveCommand(client *c) {
  * pointer if the instance has a valid master client, otherwise NULL
  * is returned, and the RDB saving will not persist any replication related
  * information. */
+// 获取开始rdbsave所需信息
 rdbSaveInfo *rdbPopulateSaveInfo(rdbSaveInfo *rsi) {
     rdbSaveInfo rsi_init = RDB_SAVE_INFO_INIT;
     *rsi = rsi_init;

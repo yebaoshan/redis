@@ -178,22 +178,30 @@ client *createClient(int fd) {
 int prepareClientToWrite(client *c) {
     /* If it's the Lua client we always return ok without installing any
      * handler since there is no socket at all. */
+    // 如果是要执行lua脚本的伪client，则总是返回C_OK，总是可写的
     if (c->flags & (CLIENT_LUA|CLIENT_MODULE)) return C_OK;
 
     /* CLIENT REPLY OFF / SKIP handling: don't send replies. */
+    // 如果client没有开启这条命令的回复功能，则返回C_ERR
+    // CLIENT_REPLY_OFF设置为不回复，服务器不会回复client命令
+    // CLIENT_REPLY_SKIP设置为跳过该条回复，服务器会跳过这条命令的回复
     if (c->flags & (CLIENT_REPLY_OFF|CLIENT_REPLY_SKIP)) return C_ERR;
 
     /* Masters don't receive replies, unless CLIENT_MASTER_FORCE_REPLY flag
      * is set. */
+    // 主节点服务器且没有设置强制回复，返回C_ERR
     if ((c->flags & CLIENT_MASTER) &&
         !(c->flags & CLIENT_MASTER_FORCE_REPLY)) return C_ERR;
 
+    // 如果是载入AOF的伪client
     if (c->fd <= 0) return C_ERR; /* Fake client for AOF loading. */
 
     /* Schedule the client to write the output buffers to the socket only
      * if not already done (there were no pending writes already and the client
      * was yet not flagged), and, for slaves, if the slave can actually
      * receive writes at this stage. */
+    // 如果client的回复缓冲区为空;且client还有输出的数据，但是没有设置写处理程序;且
+    // replication的状态为关闭状态;或已经将RDB传输完成且不向主节点发送ack
     if (!clientHasPendingReplies(c) &&
         !(c->flags & CLIENT_PENDING_WRITE) &&
         (c->replstate == REPL_STATE_NONE ||
@@ -205,7 +213,9 @@ int prepareClientToWrite(client *c) {
          * loop, we can try to directly write to the client sockets avoiding
          * a system call. We'll only really install the write handler if
          * we'll not be able to write the whole reply at once. */
+        // 将client设置为还有输出的数据，但是没有设置写处理程序
         c->flags |= CLIENT_PENDING_WRITE;
+        // 将当前client加入到要写或者安装写处理程序的client链表
         listAddNodeHead(server.clients_pending_write,c);
     }
 
@@ -216,7 +226,7 @@ int prepareClientToWrite(client *c) {
 /* -----------------------------------------------------------------------------
  * Low level functions to add more data to output buffers.
  * -------------------------------------------------------------------------- */
-
+// 添加回复内容到固定回复缓冲
 int _addReplyToBuffer(client *c, const char *s, size_t len) {
     size_t available = sizeof(c->buf)-c->bufpos;
 
@@ -290,6 +300,7 @@ void _addReplySdsToList(client *c, sds s) {
     asyncCloseClientOnOutputBufferLimitReached(c);
 }
 
+// 添加输出内容到回复链表
 void _addReplyStringToList(client *c, const char *s, size_t len) {
     if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return;
 
@@ -313,6 +324,7 @@ void _addReplyStringToList(client *c, const char *s, size_t len) {
             c->reply_bytes += len;
         }
     }
+    // 检查回复缓冲区的大小是否超过系统限制，如果超过则关闭client
     asyncCloseClientOnOutputBufferLimitReached(c);
 }
 
@@ -379,8 +391,11 @@ void addReplySds(client *c, sds s) {
  * if not needed. The object will only be created by calling
  * _addReplyStringToList() if we fail to extend the existing tail object
  * in the list of objects. */
+// 将c字符串复制到client的回复缓冲区中
 void addReplyString(client *c, const char *s, size_t len) {
+    //准备client为可写的
     if (prepareClientToWrite(c) != C_OK) return;
+    // 将字符串复制到client的回复缓冲区中
     if (_addReplyToBuffer(c,s,len) != C_OK)
         _addReplyStringToList(c,s,len);
 }
@@ -641,8 +656,10 @@ int clientHasPendingReplies(client *c) {
 }
 
 #define MAX_ACCEPTS_PER_CALL 1000
+// 处理新连接
 static void acceptCommonHandler(int fd, int flags, char *ip) {
     client *c;
+    // createClient中会创建接收读事件
     if ((c = createClient(fd)) == NULL) {
         serverLog(LL_WARNING,
             "Error registering fd event for the new client: %s (fd=%d)",
@@ -654,6 +671,7 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
      * connection. Note that we create the client instead to check before
      * for this condition, since now the socket is already set in non-blocking
      * mode and we can send an error for free using the Kernel I/O */
+    // 已达到最大连接数，则拒绝
     if (listLength(server.clients) > server.maxclients) {
         char *err = "-ERR max number of clients reached\r\n";
 
@@ -670,6 +688,7 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
      * is no password set, nor a specific interface is bound, we don't accept
      * requests from non loopback interfaces. Instead we try to explain the
      * user what to do to fix it if needed. */
+     // 如果服务器正在以保护模式运行（默认），且没有设置密码，也没有绑定指定的接口，我们就不接受非回环接口的请求。相反，如果需要，我们会尝试解释用户如何解决问题
     if (server.protected_mode &&
         server.bindaddr_count == 0 &&
         server.requirepass == NULL &&
@@ -707,7 +726,9 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
         }
     }
 
+    // 更新连接的数量
     server.stat_numconnections++;
+    // 更新客户端标志
     c->flags |= flags;
 }
 
@@ -837,64 +858,82 @@ void freeClient(client *c) {
     }
 
     /* Log link disconnection with slave */
+    // client是从服务器，且不是执行监控,记录日志
     if ((c->flags & CLIENT_SLAVE) && !(c->flags & CLIENT_MONITOR)) {
         serverLog(LL_WARNING,"Connection with slave %s lost.",
             replicationGetSlaveName(c));
     }
 
     /* Free the query buffer */
+    // 释放输入缓冲
     sdsfree(c->querybuf);
     sdsfree(c->pending_querybuf);
     c->querybuf = NULL;
 
     /* Deallocate structures used to block on blocking ops. */
+    // 如果是阻塞的client，则解除阻塞
     if (c->flags & CLIENT_BLOCKED) unblockClient(c);
+    // 释放造成client阻塞的键
     dictRelease(c->bpop.keys);
 
     /* UNWATCH all the keys */
+    // 清空监视的键
     unwatchAllKeys(c);
     listRelease(c->watched_keys);
 
     /* Unsubscribe from all the pubsub channels */
+    // 退订所有的频道和模式
     pubsubUnsubscribeAllChannels(c,0);
     pubsubUnsubscribeAllPatterns(c,0);
     dictRelease(c->pubsub_channels);
     listRelease(c->pubsub_patterns);
 
     /* Free data structures. */
+    // 释放回复链表
     listRelease(c->reply);
+    // 释放client的参数列表
     freeClientArgv(c);
 
     /* Unlink the client: this will close the socket, remove the I/O
      * handlers, and remove references of the client from different
      * places where active clients may be referenced. */
+    // 从不同状态的client链表中删除client，会关闭socket，从事件循环中移除对该client的监听
     unlinkClient(c);
 
     /* Master/slave cleanup Case 1:
      * we lost the connection with a slave. */
+    // 如果是从节点的client
     if (c->flags & CLIENT_SLAVE) {
+        // 如果当前服务器的复制状态为：正在发送RDB文件给从节点
         if (c->replstate == SLAVE_STATE_SEND_BULK) {
             if (c->repldbfd != -1) close(c->repldbfd);
             if (c->replpreamble) sdsfree(c->replpreamble);
         }
+        // 获取保存当前client的链表地址，监控器链表或从节点链表
         list *l = (c->flags & CLIENT_MONITOR) ? server.monitors : server.slaves;
+        // 取出保存client的节点
         ln = listSearchKey(l,c);
         serverAssert(ln != NULL);
+        // 删除该client
         listDelNode(l,ln);
         /* We need to remember the time when we started to have zero
          * attached slaves, as after some time we'll free the replication
          * backlog. */
+        // 服务器从节点链表为空，要保存当前时间,用于之后释放backlog
         if (c->flags & CLIENT_SLAVE && listLength(server.slaves) == 0)
             server.repl_no_slaves_since = server.unixtime;
+        // 重新计算状态良好的从节点服务器的数量
         refreshGoodSlavesCount();
     }
 
     /* Master/slave cleanup Case 2:
      * we lost the connection with the master. */
+    // 如果是主节点的client，处理从服务器和主服务器的断开
     if (c->flags & CLIENT_MASTER) replicationHandleMasterDisconnection();
 
     /* If this client was scheduled for async freeing we need to remove it
      * from the queue. */
+    // 如果client即将关闭，则从clients_to_close中找到并删除
     if (c->flags & CLIENT_CLOSE_ASAP) {
         ln = listSearchKey(server.clients_to_close,c);
         serverAssert(ln != NULL);
@@ -903,8 +942,10 @@ void freeClient(client *c) {
 
     /* Release other dynamically allocated client structure fields,
      * and finally release the client structure itself. */
+    // 如果client有名字，则释放
     if (c->name) decrRefCount(c->name);
     zfree(c->argv);
+    // 清除事物状态
     freeClientMultiState(c);
     sdsfree(c->peerid);
     zfree(c);
@@ -1496,6 +1537,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         processInputBuffer(c);
         size_t applied = c->reploff - prev_offset;
         if (applied) {
+            // 将从主节点接受的数据传递给子从节点
             replicationFeedSlavesFromMasterStream(server.slaves,
                     c->pending_querybuf, applied);
             sdsrange(c->pending_querybuf,applied,-1);
@@ -1947,6 +1989,7 @@ char *getClientTypeName(int class) {
  *
  * Return value: non-zero if the client reached the soft or the hard limit.
  *               Otherwise zero is returned. */
+// 检查输出缓冲是否达到软限制与硬限制
 int checkClientOutputBufferLimits(client *c) {
     int soft = 0, hard = 0, class;
     unsigned long used_mem = getClientOutputBufferMemoryUsage(c);
@@ -1992,6 +2035,7 @@ int checkClientOutputBufferLimits(client *c) {
  * Note: we need to close the client asynchronously because this function is
  * called from contexts where the client can't be freed safely, i.e. from the
  * lower level functions pushing data inside the client output buffers. */
+// 如果client达到缓冲区的限制，则异步关闭client，防止底层函数正在向client的输出缓冲区写数据
 void asyncCloseClientOnOutputBufferLimitReached(client *c) {
     serverAssert(c->reply_bytes < SIZE_MAX-(1024*64));
     if (c->reply_bytes == 0 || c->flags & CLIENT_CLOSE_ASAP) return;
