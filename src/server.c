@@ -421,6 +421,7 @@ mstime_t mstime(void) {
  * exit(), because the latter may interact with the same file objects used by
  * the parent process. However if we are testing the coverage normal exit() is
  * used in order to obtain the right coverage information. */
+// 当RDB和AOF后，使用_exit()函数退出而不是exit()函数，因为exit()函数退出时，会清空IO缓冲区(关闭所有打开的流，这将导致写所有被缓冲的输出)
 void exitFromChild(int retcode) {
 #ifdef COVERAGE_TEST
     exit(retcode);
@@ -1065,6 +1066,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         int statloc;
         pid_t pid;
 
+        // pid 为0时, 子进程状态没有退出，可能还在RDB或重写
         if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) {
             int exitcode = WEXITSTATUS(statloc);
             int bysignal = 0;

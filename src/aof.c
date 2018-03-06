@@ -92,6 +92,7 @@ unsigned long aofRewriteBufferSize(void) {
 /* Event handler used to send data to the child process doing the AOF
  * rewrite. We send pieces of our AOF differences buffer so that the final
  * write when the child finishes the rewrite will be small. */
+// aof_pipe_write_data_to_child事件处理器，发送数据到子进程,管道缓存为满，可写则被触发
 void aofChildWriteDiffData(aeEventLoop *el, int fd, void *privdata, int mask) {
     listNode *ln;
     aofrwblock *block;
@@ -122,6 +123,8 @@ void aofChildWriteDiffData(aeEventLoop *el, int fd, void *privdata, int mask) {
 }
 
 /* Append data to the AOF rewrite buffer, allocating new blocks if needed. */
+// 追加数据到AOF重写缓存
+// 首先追加到重写缓存块链表中,每块大小为AOF_RW_BUF_BLOCK_SIZE
 void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
     listNode *ln = listLast(server.aof_rewrite_buf_blocks);
     aofrwblock *block = ln ? ln->value : NULL;
@@ -162,6 +165,7 @@ void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
 
     /* Install a file event to send data to the rewrite child if there is
      * not one already. */
+    // 插入事件，传输数据到子进程
     if (aeGetFileEvents(server.el,server.aof_pipe_write_data_to_child) == 0) {
         aeCreateFileEvent(server.el, server.aof_pipe_write_data_to_child,
             AE_WRITABLE, aofChildWriteDiffData, NULL);
@@ -328,6 +332,7 @@ ssize_t aofWrite(int fd, const char *buf, size_t len) {
  * However if force is set to 1 we'll write regardless of the background
  * fsync. */
 #define AOF_WRITE_LOG_ERROR_RATE 30 /* Seconds between errors logging. */
+// 写aof_buf数据到文件，并根据同步策略进行同步
 void flushAppendOnlyFile(int force) {
     ssize_t nwritten;
     int sync_in_progress = 0;
@@ -483,6 +488,7 @@ void flushAppendOnlyFile(int force) {
         latencyEndMonitor(latency);
         latencyAddSampleIfNeeded("aof-fsync-always",latency);
         server.aof_last_fsync = server.unixtime;
+    // server.unixtime 单位为秒
     } else if ((server.aof_fsync == AOF_FSYNC_EVERYSEC &&
                 server.unixtime > server.aof_last_fsync)) {
         if (!sync_in_progress) aof_background_fsync(server.aof_fd);
@@ -552,6 +558,7 @@ sds catAppendOnlyExpireAtCommand(sds buf, struct redisCommand *cmd, robj *key, r
     return buf;
 }
 
+// 添加命令到aof_buf
 void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int argc) {
     sds buf = sdsempty();
     robj *tmpargv[3];
@@ -612,6 +619,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
      * accumulate the differences between the child DB and the current one
      * in a buffer, so that when the child process will do its work we
      * can append the differences to the new append only file. */
+    // 正在重写aof，则将命令加入到重写缓存
     if (server.aof_child_pid != -1)
         aofRewriteBufferAppend((unsigned char*)buf,sdslen(buf));
 
@@ -1124,6 +1132,8 @@ int rewriteModuleObject(rio *r, robj *key, robj *o) {
 /* This function is called by the child rewriting the AOF file to read
  * the difference accumulated from the parent into a buffer, that is
  * concatenated at the end of the rewrite. */
+// 该函数在子进程正在进行重写AOF文件时调用
+// 用来读从父进程累计写入的缓冲区的差异，在重写结束时链接到文件的结尾
 ssize_t aofReadDiffFromParent(void) {
     char buf[65536]; /* Default pipe buffer size on most Linux systems. */
     ssize_t nread, total = 0;
@@ -1135,7 +1145,7 @@ ssize_t aofReadDiffFromParent(void) {
     }
     return total;
 }
-
+// 依次遍历数据，将各个健写入临时文件
 int rewriteAppendOnlyFileRio(rio *aof) {
     dictIterator *di = NULL;
     dictEntry *de;
@@ -1200,6 +1210,7 @@ int rewriteAppendOnlyFileRio(rio *aof) {
                 if (rioWriteBulkLongLong(aof,expiretime) == 0) goto werr;
             }
             /* Read some diff from the parent process from time to time. */
+            // 从相应管道中读取
             if (aof->processed_bytes > processed+AOF_READ_DIFF_INTERVAL_BYTES) {
                 processed = aof->processed_bytes;
                 aofReadDiffFromParent();
@@ -1240,9 +1251,12 @@ int rewriteAppendOnlyFile(char *filename) {
     server.aof_child_diff = sdsempty();
     rioInitWithFile(&aof,fp);
 
+    // 如果开启了增量时同步，防止在缓存中累计太多命令，造成写入时IO阻塞时间过长
+    // 按AOF_AUTOSYNC_BYTES进行sync
     if (server.aof_rewrite_incremental_fsync)
         rioSetAutoSync(&aof,AOF_AUTOSYNC_BYTES);
 
+    // 打开了混合开关. [RDB file][AOF tail]
     if (server.aof_use_rdb_preamble) {
         int error;
         if (rdbSaveRio(&aof,&error,RDB_SAVE_AOF_PREAMBLE,NULL) == C_ERR) {
@@ -1410,18 +1424,29 @@ void aofClosePipes(void) {
  *    finally will rename(2) the temp file in the actual file name.
  *    The the new file is reopened as the new append only file. Profit!
  */
+// 后台重写AOF文件
+// 以下是BGREWRITEAOF的工作步骤
+// 1. 用户调用BGREWRITEAOF
+// 2. Redis调用这个函数，它执行fork()
+//      2.1 子进程在临时文件中执行重写操作
+//      2.2 父进程将累计的差异数据追加到server.aof_rewrite_buf中
+// 3. 当子进程完成2.1
+// 4. 父进程会捕捉到子进程的退出码，如果是OK，那么追加累计的差异数据到临时文件，并且对临时文件rename，用它代替旧的AOF文件，然后就完成AOF的重>写。
 int rewriteAppendOnlyFileBackground(void) {
     pid_t childpid;
     long long start;
 
     if (server.aof_child_pid != -1 || server.rdb_child_pid != -1) return C_ERR;
+    // 创建父子进程间通信的管道
     if (aofCreatePipes() != C_OK) return C_ERR;
+    // 创建child->parent管道
     openChildInfoPipe();
     start = ustime();
     if ((childpid = fork()) == 0) {
         char tmpfile[256];
 
         /* Child */
+        // 关闭监听的套接字
         closeListeningSockets(0);
         redisSetProcTitle("redis-aof-rewrite");
         snprintf(tmpfile,256,"temp-rewriteaof-bg-%d.aof", (int) getpid());
@@ -1463,6 +1488,7 @@ int rewriteAppendOnlyFileBackground(void) {
          * feedAppendOnlyFile() to issue a SELECT command, so the differences
          * accumulated by the parent into server.aof_rewrite_buf will start
          * with a SELECT statement and it will be safe to merge. */
+        // 强制让feedAppendOnlyFile函数执行时，执行一个select命令
         server.aof_selected_db = -1;
         replicationScriptCacheFlush();
         return C_OK;
@@ -1511,6 +1537,7 @@ void aofUpdateCurrentSize(void) {
 
 /* A background append only file rewriting (BGREWRITEAOF) terminated its work.
  * Handle this. */
+// 子进程AOF重写执行完成后,调用此函数做相关结尾工作
 void backgroundRewriteDoneHandler(int exitcode, int bysignal) {
     if (!bysignal && exitcode == 0) {
         int newfd, oldfd;
