@@ -169,6 +169,7 @@ void queueLoadModule(sds path, sds *argv, int argc) {
     listAddNodeTail(server.loadmodule_queue,loadmod);
 }
 
+// 加载服务器配置
 void loadServerConfigFromString(char *config) {
     char *err = NULL;
     int linenum = 0, totlines, i;
@@ -762,6 +763,7 @@ loaderr:
  * Both filename and options can be NULL, in such a case are considered
  * empty. This way loadServerConfig can be used to just load a file or
  * just load a string. */
+// 从配置文件载入服务器配置
 void loadServerConfig(char *filename, char *options) {
     sds config = sdsempty();
     char buf[CONFIG_MAX_LINE+1];

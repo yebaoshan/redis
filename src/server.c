@@ -3802,6 +3802,7 @@ int main(int argc, char **argv) {
     char hashseed[16];
     getRandomHexChars(hashseed,sizeof(hashseed));
     dictSetHashFunctionSeed((uint8_t*)hashseed);
+    // 是否为sentinel模式启动
     server.sentinel_mode = checkForSentinelMode(argc,argv);
 
     // 初始化服务器状态结构
@@ -3819,6 +3820,7 @@ int main(int argc, char **argv) {
      * in sentinel mode will have the effect of populating the sentinel
      * data structures with master nodes to monitor. */
     if (server.sentinel_mode) {
+        // 初始化哨兵配置
         initSentinelConfig();
         initSentinel();
     }
@@ -3946,6 +3948,7 @@ int main(int argc, char **argv) {
         if (server.sofd > 0)
             serverLog(LL_NOTICE,"The server is now ready to accept connections at %s", server.unixsocket);
     } else {
+        // 载入sentinel配置，并且准备好一些操作
         sentinelIsRunning();
     }
 
