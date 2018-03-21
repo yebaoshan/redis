@@ -42,6 +42,7 @@ typedef struct clusterLink {
     int fd;                     /* TCP socket file descriptor */
     sds sndbuf;                 /* Packet send buffer */
     sds rcvbuf;                 /* Packet reception buffer */
+    // 与这个连接相关联的节点，如果没有的话就为NULL
     struct clusterNode *node;   /* Node related to this link if any, or NULL */
 } clusterLink;
 
@@ -107,10 +108,12 @@ typedef struct clusterNode {
     char name[CLUSTER_NAMELEN]; /* Node name, hex string, sha1-size */
     int flags;      /* CLUSTER_NODE_... */
     uint64_t configEpoch; /* Last configEpoch observed for this node */
+    // 节点的槽位图
     unsigned char slots[CLUSTER_SLOTS/8]; /* slots handled by this node */
     int numslots;   /* Number of slots handled by this node */
     int numslaves;  /* Number of slave nodes, if this is a master */
     struct clusterNode **slaves; /* pointers to slave nodes */
+    // 指向主节点，即使是从节点也可以为NULL
     struct clusterNode *slaveof; /* pointer to the master node. Note that it
                                     may be NULL even if the node is a slave
                                     if we don't have the master node in our
@@ -120,51 +123,77 @@ typedef struct clusterNode {
     mstime_t fail_time;      /* Unix time when FAIL flag was set */
     mstime_t voted_time;     /* Last time we voted for a slave of this master */
     mstime_t repl_offset_time;  /* Unix time we received offset for this node */
+    // 孤立的主节点迁移的时间
     mstime_t orphaned_time;     /* Starting time of orphaned master condition */
     long long repl_offset;      /* Last known repl offset for this node. */
     char ip[NET_IP_STR_LEN];  /* Latest known IP address of this node */
     int port;                   /* Latest known clients port of this node */
     int cport;                  /* Latest known cluster port of this node. */
+    // 与该节点关联的连接对象
     clusterLink *link;          /* TCP/IP link with this node */
+    // 保存下线报告的链表
     list *fail_reports;         /* List of nodes signaling this as failing */
 } clusterNode;
 
 typedef struct clusterState {
     clusterNode *myself;  /* This node */
+    // 集群当前的配置纪元，用于实现故障转移
     uint64_t currentEpoch;
     int state;            /* CLUSTER_OK, CLUSTER_FAIL, ... */
+    // 集群中至少负责一个槽的主节点个数
     int size;             /* Num of master nodes with at least one slot */
+    // 保存集群节点的字典，键是节点名字，值是clusterNode结构的指针(包括myself节点)
     dict *nodes;          /* Hash table of name -> clusterNode structures */
+    // 防止重复添加节点的黑名单
     dict *nodes_black_list; /* Nodes we don't re-add for a few seconds. */
+    // 导出槽数据到目标节点，该数组记录这些节点
     clusterNode *migrating_slots_to[CLUSTER_SLOTS];
+    // 导入槽数据到目标节点，该数组记录这些节点
     clusterNode *importing_slots_from[CLUSTER_SLOTS];
+    // 槽和负责槽节点的映射
     clusterNode *slots[CLUSTER_SLOTS];
     uint64_t slots_keys_count[CLUSTER_SLOTS];
+    // 槽映射到键的集合
     rax *slots_to_keys;
     /* The following fields are used to take the slave state on elections. */
+    // 之前或下一次选举的时间
     mstime_t failover_auth_time; /* Time of previous or next election. */
+    // 节点获得支持的票数
     int failover_auth_count;    /* Number of votes received so far. */
+    // 如果为真，表示本节点已经向其他节点发送了投票请求
     int failover_auth_sent;     /* True if we already asked for votes. */
+    // 该从节点在当前请求中的排名
     int failover_auth_rank;     /* This slave rank for current auth request. */
+    // 当前选举的纪元
     uint64_t failover_auth_epoch; /* Epoch of the current election. */
+    // 从节点不能执行故障转移的原因
     int cant_failover_reason;   /* Why a slave is currently not able to
                                    failover. See the CANT_FAILOVER_* macros. */
     /* Manual failover state in common. */
+    // 如果为0，表示没有正在进行手动的故障转移。否则表示手动故障转移的时间限制
     mstime_t mf_end;            /* Manual failover time limit (ms unixtime).
                                    It is zero if there is no MF in progress. */
     /* Manual failover state of master. */
+    // 执行手动孤战转移的从节点
     clusterNode *mf_slave;      /* Slave performing the manual failover. */
     /* Manual failover state of slave. */
+    // 从节点记录手动故障转移时的主节点偏移量
     long long mf_master_offset; /* Master offset the slave needs to start MF
                                    or zero if stil not received. */
+    // 非零值表示手动故障转移能开始
     int mf_can_start;           /* If non-zero signal that the manual failover
                                    can start requesting masters vote. */
     /* The followign fields are used by masters to take state on elections. */
+    // 集群最近一次投票的纪元
     uint64_t lastVoteEpoch;     /* Epoch of the last vote granted. */
+    // 调用clusterBeforeSleep()所做的一些事
     int todo_before_sleep; /* Things to do in clusterBeforeSleep(). */
     /* Messages received and sent by type. */
+    // 发送的字节数
     long long stats_bus_messages_sent[CLUSTERMSG_TYPE_COUNT];
+    // 通过Cluster接收到的消息数量
     long long stats_bus_messages_received[CLUSTERMSG_TYPE_COUNT];
+    // 处于主观下线状态的节点个数
     long long stats_pfail_nodes;    /* Number of nodes in PFAIL status,
                                        excluding nodes without address. */
 } clusterState;
